@@ -815,17 +815,19 @@ tbody tr:hover{background:rgba(59,130,246,.07);}
 /* ─── DATA ─── */
 const MODELS=[
   // [nombre, precio, servicio_preventivo]
-  ["U2",21945,2287],["KF-RACER",21971,2460],["U5",26145,2287],["METRO",31395,2250],
-  ["ADVENTURE ELITE",31395,2250],["ALIEN R 175",32445,2250],["ROCKY 125",37370,2250],
+  // Precios = "PRECIO DE LISTA" del bloque PRECIO PROMOCION. Lista Dinamo vigente 25/08/2026.
+  ["U2",21945,2287],["KF-RACER",21971,2287],["U5",26145,2287],["U5 175",27720,2287],
+  ["METRO",31395,2250],["ADVENTURE ELITE",31395,2250],["ADVENTURE ELITE 175",34545,2250],
+  ["ALIEN R 175",32445,2250],["ROCKY 125",37370,2250],
   ["SCORPION 200",39575,2512],["CUSTOM 150",38745,2287],["CUSTOM BLACK",43985,2287],
   ["RAYO 175",42945,2287],["CHOPPER",38556,2962],["RENEGADA 250",51650,2962],
-  ["SCORPION XT",41895,2512],["RAYO ELITE 250",52805,2512],["R2 GT",55010,3814],
-  ["SPEEDFIRE SPDF 250",56060,3983],["DNM 2.5",61520,2636],["R4",55335,5832],
+  ["SCORPION XT",41895,2512],["RAYO ELITE 250",52805,2512],["R2 GT",55010,2512],
+  ["SPEEDFIRE SPDF 250",56060,3983],["DNM 2.5",61520,2636],["R4",55335,2962],
   ["HEAVY-B CAB",62895,4725],["XTREME RLX 200",57645,2250],["CROSS COUNTRY ADV",55246,2512],
-  ["DNM 4 400",75905,2438],["GOLIAT",78110,2250],["B52 250",68145,4133],
-  ["SUPER SPORT 400",80315,2250],["HEAVY CAB - R 200",69195,5832],["SKELETON",81470,3983],
-  ["DNM 3.0",83675,2438],["COMANDO",83895,2962],["MOTO TX",85995,5832],
-  ["MOLOTOV C2",81795,2250],["HEAVY MAX 250",94395,0],["BANDID",83895,4766],
+  ["DNM 4 400",75905,3814],["GOLIAT",78110,2250],["B52 250",68145,4133],
+  ["SUPER SPORT 400",80315,3814],["HEAVY CAB - R 200",69195,4725],["SKELETON",81470,3983],
+  ["DNM 3.0",83675,2438],["COMANDO",83895,3983],["MOTO TX",85995,5832],
+  ["MOLOTOV C2",81795,2437],["HEAVY MAX 250",94395,7114],["BANDID",83895,4766],
   ["HEAVY CAB 300",90195,5832]
 ];
 
@@ -838,13 +840,17 @@ const SCHEMES={
   credinamo:{label:"Credinamo",min:10,max:75,termUnit:"quincenas",terms:[12,18,24,36,48,60,72],levels:[
     {range:[10,19.99],  m:{12:.103978,18:.077030,24:.063198,36:.051441,48:.047086,60:.045741,72:.044146}},
     {range:[20,29.99],  m:{12:.101450,18:.074411,24:.060493,36:.048478,48:.043844,60:.042268,72:.040490}},
-    {range:[30,75],     m:{12:.097719,18:.070579,24:.056545,36:.044170,48:.039177,60:.037233,72:.035218}}
+    {range:[30,49.99],  m:{12:.097719,18:.070579,24:.056545,36:.044170,48:.039177,60:.037233,72:.035218}},
+    // >=50%: calibrado contra la tabla oficial "CREDINAMO 50%" (vigencia 25/08/2026)
+    {range:[50,75],     m:{12:.101446,18:.074417,24:.060490,36:.048469,48:.043840,60:.042260,72:.040489}}
   ]},
   motoxpress:{label:"Motoxpress",min:15,max:75,termUnit:"quincenas",terms:[12,18,24,36,48,60,72],levels:[
     {range:[0,100],     m:{12:.106526,18:.079696,24:.065980,36:.054497,48:.050399,60:.049320,72:.047874}}
   ]},
   enganche50:{label:"50% de Enganche",min:50,max:75,termUnit:"quincenas",terms:[12,18,24,36,48,60,72],levels:[
-    {range:[0,100],     m:{12:.101456,18:.074419,24:.060489,36:.048456,48:.043838,60:.042265,72:.040492}}
+    // Calibrado contra la tabla oficial "CREDINAMO 50%" (vigencia 25/08/2026):
+    // reproduce al peso las 245 parcialidades publicadas (35 modelos x 7 plazos)
+    {range:[0,100],     m:{12:.101446,18:.074417,24:.060490,36:.048469,48:.043840,60:.042260,72:.040489}}
   ]},
   credinamo_flex:{label:"Credinamo Flex",min:10,max:75,termUnit:"semanas",terms:[52,65,96,128,142,154,170],levels:[
     {range:[10,49.99],  m:{52:.029317,65:.025751,96:.021436,128:.019474,142:.018972,154:.018641,170:.018290}},
@@ -854,6 +860,53 @@ const SCHEMES={
     {range:[0,100],     m:{52:.029955,65:.026416,96:.022169,128:.020269,142:.019777,144:.019714,154:.019470,170:.019148}}
   ]},
 };
+
+/* ─── CATÁLOGO COMPARTIDO DINAMO ───
+   Al abrir, se pide el catálogo único de Dinamo a Supabase (función catalogo()).
+   Si responde bien, reemplaza MODELS y los números (rangos, plazos y factores)
+   de los esquemas que este cotizador ya muestra; los nombres de los esquemas no cambian.
+   Si falla o tarda más de 3 s, se queda la copia de arriba como respaldo. */
+const CATALOGO_URL='https://ehyqexzaauvjoioafqdz.supabase.co/rest/v1/rpc/catalogo';
+const CATALOGO_KEY='sb_publishable_wHca_29_5WG40UG0w9TSlg_D6UnWHnP'; // clave publicable: solo lectura
+const CATALOGO_TIMEOUT_MS=3000;
+
+function catalogoValido(cat){
+  const num=v=>typeof v==='number'&&Number.isFinite(v);
+  if(!cat||!Array.isArray(cat.modelos)||!cat.modelos.length) return false;
+  if(!cat.modelos.every(m=>Array.isArray(m)&&typeof m[0]==='string'&&m[0].trim()&&num(m[1])&&m[1]>0&&num(m[2])&&m[2]>=0)) return false;
+  if(!cat.esquemas||typeof cat.esquemas!=='object') return false;
+  return Object.keys(SCHEMES).every(k=>{
+    const e=cat.esquemas[k];
+    if(e===undefined) return true;   // un esquema que no venga se queda con los datos de respaldo
+    return !!e&&num(e.min)&&num(e.max)&&e.min>=0&&e.min<=e.max&&e.max<=100
+      &&(e.termUnit==='quincenas'||e.termUnit==='semanas')
+      &&Array.isArray(e.terms)&&e.terms.length>0&&e.terms.every(t=>Number.isInteger(t)&&t>0)
+      &&Array.isArray(e.levels)&&e.levels.length>0
+      &&e.levels.every(l=>l&&Array.isArray(l.range)&&l.range.length===2&&num(l.range[0])&&num(l.range[1])
+        &&l.range[0]<=l.range[1]&&l.m&&e.terms.every(t=>num(l.m[t])&&l.m[t]>0));
+  });
+}
+/* Copia el catálogo sobre MODELS y SCHEMES. Devuelve true si algo cambió. */
+function aplicarCatalogo(cat){
+  const antes=JSON.stringify([MODELS,SCHEMES]);
+  MODELS.splice(0,MODELS.length,...cat.modelos.map(([n,p,s])=>[n,p,s]));
+  Object.keys(SCHEMES).forEach(k=>{
+    const e=cat.esquemas[k];
+    if(!e) return;
+    Object.assign(SCHEMES[k],{min:e.min,max:e.max,termUnit:e.termUnit,terms:e.terms.slice(),
+      levels:e.levels.map(l=>({range:l.range.slice(),m:Object.fromEntries(e.terms.map(t=>[t,l.m[t]]))}))});
+  });
+  return JSON.stringify([MODELS,SCHEMES])!==antes;
+}
+function cargarCatalogo(){
+  const ctl=new AbortController();
+  const timer=setTimeout(()=>ctl.abort(),CATALOGO_TIMEOUT_MS);
+  return fetch(CATALOGO_URL,{method:'POST',body:'{}',cache:'no-store',signal:ctl.signal,
+      headers:{apikey:CATALOGO_KEY,'Content-Type':'application/json'}})
+    .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(cat=>{ if(!catalogoValido(cat)) throw new Error('forma inesperada'); return cat; })
+    .finally(()=>clearTimeout(timer));
+}
 
 /* ─── FORMATTERS ─── */
 const mxn=n=>new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN',minimumFractionDigits:2}).format(n);
@@ -888,8 +941,9 @@ function goStep(n){
 }
 
 /* ─── BUILD MOTO GRID ─── */
-(function buildGrid(){
+function buildGrid(){
   const grid=document.getElementById('motoGrid');
+  grid.textContent='';
   MODELS.forEach(([name,price],i)=>{
     const c=document.createElement('div');
     c.className='moto-card';
@@ -902,7 +956,8 @@ function goStep(n){
     grid.appendChild(c);
   });
   updateCount();
-})();
+}
+buildGrid();
 
 function updateCount(){
   const visible=[...document.querySelectorAll('.moto-card:not(.hidden)')].length;
@@ -1341,6 +1396,31 @@ async function doDownload(){
     cta.innerHTML=`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Descargar JPG`;
   }
 }
+
+/* ─── CATÁLOGO EN LÍNEA ───
+   Cuando llega el catálogo y trae cambios, se redibujan las motos y los rangos
+   de los esquemas, conservando la moto (por nombre) y el esquema ya elegidos. */
+cargarCatalogo().then(cat=>{
+  const nombre=selModelIdx!==null?MODELS[selModelIdx][0]:null;
+  if(!aplicarCatalogo(cat)) return;
+  buildGrid();
+  filterModels(document.getElementById('motoSearch').value);
+  document.querySelectorAll('.sc-card[data-sc]').forEach(c=>{
+    const sc=SCHEMES[c.dataset.sc], meta=c.querySelector('.sc-meta');
+    if(sc&&meta) meta.textContent=`Enganche ${sc.min}% – ${sc.max}%${sc.termUnit==='semanas'?' · Semanal':''}`;
+  });
+  const i=nombre===null?-1:MODELS.findIndex(m=>m[0]===nombre);
+  if(i>=0){
+    const conServicio=svcActive;
+    selectModel(i,document.querySelectorAll('.moto-card')[i]);
+    if(conServicio) setServicio(true);
+  }else if(nombre!==null){ clearModel(); goStep(0); }
+  if(selScheme){
+    const sc=SCHEMES[selScheme];
+    document.getElementById('termNote').innerHTML=`<strong>Nota:</strong> Las parcialidades de este esquema se calculan en <em>${sc.termUnit}</em>. El resultado se redondea al entero más cercano.`;
+    validateDown();
+  }
+},e=>console.warn('Catálogo en línea no disponible; se usan los datos de respaldo.',e));
 </script>
 </body>
 </html>
